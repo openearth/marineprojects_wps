@@ -1,10 +1,10 @@
-# Groundwater monitoring Web Processing Service
+# Web Processing Service to ingest KRM validated data into backend and provide service
 
-A PyWPS implementation of the Web Processing Service
+A PyWPS implementation of the Web Processing Service 
 
 ## Install command
 
-conda create --name env_name -c conda-forge python=3.8 --file requirements.txt
+conda create --name env_name --file environment.yml
 
 ## Run service commands
 
