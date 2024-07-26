@@ -6,6 +6,8 @@ data/*
 static/*
 configuration*.txt
 *configuration*.txt
+geopackage/*
+*.ipynb
 
 # vim, mac os
 *.sw*

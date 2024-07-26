@@ -29,10 +29,12 @@ from pywps.app import Process
 from pywps.inout.outputs import LiteralOutput
 from pywps.inout.inputs import ComplexInput, LiteralInput
 from pywps.app.Common import Metadata
+from .mp_dataingestion import mainhandler
+
 
 # http://localhost:5000/wps?service=wps&request=GetCapabilities&version=2.0.0
 # http://localhost:5000/wps?request=GetCapabilities&service=WPS&version=2.0.0
-# http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"s3file_id": "s3fileid","test": "True"}
+# http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"bucketname": "krm-validatie-data-floris","key": "geopackage/output.gpkg","test": "True"}
 
 
 class WPSMPDataIngestion(Process):
@@ -40,13 +42,17 @@ class WPSMPDataIngestion(Process):
         inputs = [
             ComplexInput(
                 "s3_inputs",
-                "S3 Inputs - File ID and Test (boolean)",
+                "S3 Inputs - Bucketname, Key and Test (boolean)",
                 [Format("application/json")],
                 abstract="Complex input abstract",
             )
         ]
         outputs = [
-            LiteralOutput("Preview", "Answer to Ultimate Question", data_type="string")
+            LiteralOutput(
+                "Preview",
+                "The provided dataset following statistics",
+                data_type="string",
+            )
         ]
 
         super(WPSMPDataIngestion, self).__init__(
@@ -75,12 +81,12 @@ class WPSMPDataIngestion(Process):
 
         # parse input to json and read
         s3data = json.loads(s3_jsoninput)
-        s3id = s3data["s3file_id"]
+        bucketname = s3data["bucketname"]
+        key = s3data["key"]
         test = s3data["test"]
         # call main handler
 
         # provide feedback
-        response.outputs["Preview"].data = (
-            "https://marineprojects.openearth.eu/geoserver/shwoz/wms?service=WMS&version=1.1.0&request=GetMap&layers=shwoz%3Akleinemantelmeeuw&bbox=-9.57902812957764%2C36.1089515686035%2C5.30278778076172%2C52.5363883972168&width=695&height=768&srs=EPSG%3A4326&styles=&format=application/openlayers"
-        )
+        res = mainhandler(bucketname, key, test)
+        response.outputs["Preview"].data = json.dumps(res)
         return response

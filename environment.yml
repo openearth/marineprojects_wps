@@ -9,7 +9,10 @@ dependencies:
   - pip=24.0
   - python=3.12.4
   - sqlalchemy=2.0.30
+  - geopandas=
+  - fiona=
+  - boto3=
   - pip:
-      - psycopg2-binary==2.9.9
-      - pywps==4.6.0
+      - psycopg2-binary>=2
+      - pywps>=4
 
