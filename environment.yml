@@ -1,14 +1,14 @@
 name: marineprojects_wps
 channels:
   - conda-forge
-  - defaults
 dependencies:
-  - flask=3.0.3
-  - geoserver-rest=2.7.0
-  - pandas=2.2.2
-  - pip=24.0
-  - python=3.12.4
-  - sqlalchemy=2.0.30
+  - flask=3
+  - geoserver-rest=2
+  - pandas=2
+  - pip=24
+  - python=3
+  - sqlalchemy=2
+  - geoalchemy2=
   - geopandas=
   - fiona=
   - boto3=

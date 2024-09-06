@@ -28,7 +28,9 @@ import configparser
 import geopandas as gpd
 import boto3
 from botocore.exceptions import ClientError
-
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+import geoalchemy2
 
 # read config
 fc = r"C:\develop\marineprojects_wps\configuration.txt"
@@ -48,6 +50,41 @@ s3 = boto3.resource(
 )
 
 
+def establishconnection(fc, connectionsstring=None):
+    """
+    Set up a orm session to the target database with the connectionstring
+    in the file that is passed
+
+    Parameters
+    ----------
+    fc : string
+        DESCRIPTION.
+        Location of the file with a connectionstring to a PostgreSQL/PostGIS
+        database
+    connectionstring:
+        DESCRIPTION.
+        in case fc = none, a connectionstring can be passed
+
+    Returns
+    -------
+    session : ormsession
+        DESCRIPTION.
+        returns orm session
+
+    """
+    if fc != None:
+        f = open(fc)
+        engine = create_engine(f.read(), echo=False)
+        f.close()
+    elif fc == None and connectionsstring != None:
+        engine = create_engine(connectionsstring, echo=False)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    session.rollback()
+    return session, engine
+
+
 def s3fileprocessing(bucket_name, key, localfile):
     """Downloads file from defined bucket and stores locally
 
@@ -65,6 +102,31 @@ def s3fileprocessing(bucket_name, key, localfile):
             raise
 
 
+def loaddata2pg(gdf):
+    msg = True
+    try:
+        connstr = (
+            "postgresql+psycopg2://"
+            + cf.get("PostGIS", "user")
+            + ":"
+            + cf.get("PostGIS", "pass")
+            + "@"
+            + cf.get("PostGIS", "host")
+            + ":5432/"
+            + cf.get("PostGIS", "db")
+        )
+        session, engine = establishconnection(None, connstr)
+        with engine.connect() as con:
+            gdf.to_postgis(
+                "new", con, schema="ihm_krm", if_exists="replace", index=False
+            )
+        session.close()
+        engine.dispose()
+    except:
+        msg = False
+    return msg
+
+
 def mainhandler(bucket_name, key, test):
     """With bucket_name and key the data can be downloaded from S3. It will return some
     metrics of the file
@@ -78,7 +140,7 @@ def mainhandler(bucket_name, key, test):
         string : for now with some metrics of the retrieved file
     """
     print(bucket_name)
-    print(test)
+
     # localfile declaration
     localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
 
@@ -93,7 +155,13 @@ def mainhandler(bucket_name, key, test):
     nrrecords = len(gdf)
     nrcolums = len(gdf.columns)
 
+    # load data in pg
     string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
+    msg = loaddata2pg(gdf)
+    if msg:
+        string = string + " and loaded in database"
+    else:
+        string = string + " but failed to load into database"
     return string
 
 
