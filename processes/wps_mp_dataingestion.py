@@ -34,7 +34,13 @@ from .mp_dataingestion import mainhandler
 
 # http://localhost:5000/wps?service=wps&request=GetCapabilities&version=2.0.0
 # http://localhost:5000/wps?request=GetCapabilities&service=WPS&version=2.0.0
+
+# example requests
+# In case of test
 # http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"bucketname": "krm-validatie-data-floris","key": "geopackage/output.gpkg","test": "True"}
+
+# In case of acceptence
+# http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"bucketname": "krm-validatie-data-floris","key": "geopackage/output.gpkg","test": "False"}
 
 
 class WPSMPDataIngestion(Process):

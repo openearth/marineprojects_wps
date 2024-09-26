@@ -24,16 +24,28 @@
 # your own tools.
 
 import os
+import datetime
 import configparser
 import geopandas as gpd
+import logging
 import boto3
 from botocore.exceptions import ClientError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 import geoalchemy2
 
+logger = logging.getLogger("PYWPS")
+
 # read config
-fc = r"C:\develop\marineprojects_wps\configuration.txt"
+if os.name == "nt":
+    fc = r"C:\develop\marineprojects_wps\configuration.txt"
+else:
+    fc = os.path.join(os.path.dirname(os.path.realpath(__file__)), "configuration.txt")
+    if not os.path.exists(fc):
+        fc = "/opt/pywps/processes/configuration.txt"
+    # print("PG configpath", confpath)
+    logger.info("path to configuration", fc)
+
 cf = configparser.ConfigParser()
 cf.read(fc)
 
@@ -78,7 +90,7 @@ def establishconnection(fc, connectionsstring=None):
         f.close()
     elif fc == None and connectionsstring != None:
         engine = create_engine(connectionsstring, echo=False)
-
+    logger.info("connection setup")
     Session = sessionmaker(bind=engine)
     session = Session()
     session.rollback()
@@ -102,8 +114,18 @@ def s3fileprocessing(bucket_name, key, localfile):
             raise
 
 
-def loaddata2pg(gdf):
+def loaddata2pg(gdf, schema):
+    """This function creates a table based on the contents of the Geopandas Dataframe
+       The function creates a copy of the data based on current datatime
+
+    Args:
+        gdf (GeoPandas dataframe): geodatafram
+
+    Returns:
+        msg (boolean): boolean value indicating success (True5) or not (False)
+    """
     msg = True
+
     try:
         connstr = (
             "postgresql+psycopg2://"
@@ -116,20 +138,71 @@ def loaddata2pg(gdf):
             + cf.get("PostGIS", "db")
         )
         session, engine = establishconnection(None, connstr)
+
+        # test if the dataset is already there
+        insp = inspect(engine)
+        dt = datetime.date.today().strftime("%Y%m%d")
+        # check what to do with copy of dataset of same day?
+        print("schema", schema)
+        if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
+            print("copy of table", schema + "." + "krm_actuele_dataset" + "_" + dt)
+            strsql = f"""drop table {schema}.krm_actuele_dataset_{dt}"""
+            with engine.connect() as conn:
+                conn.execute(text(strsql))
+                conn.commit()
+
+        # this should always happen, otherwise apparently a new instance has been started
+        if insp.has_table("krm_actuele_dataset", schema=schema):
+            # rename if true
+            strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from ihm_krm.krm_actuele_dataset"""
+            print(
+                "create copy of existing data and create",
+                schema + "." + "krm_actuele_dataset" + "_" + dt,
+            )
+            with engine.connect() as conn:
+                conn.execute(text(strsql))
+                conn.commit()
+        # from here the passed GeoPandas dataframe is inserted in to the database and
+        # replaces an existing one!
         with engine.connect() as con:
             gdf.to_postgis(
-                "new", con, schema="ihm_krm", if_exists="replace", index=False
+                "krm_actuele_dataset",
+                con,
+                schema=schema,
+                if_exists="replace",
+                index=False,
             )
+            print("creation of table done")
         session.close()
         engine.dispose()
+
+        checkgeom(engine, ".".join([schema, "krm_actuele_dataset"]))
     except:
         msg = False
     return msg
 
 
+def checkgeom(engine, tbl):
+    """This function creates rename a geometry column to geom (that is expected in geoserver)
+
+    Args:
+        engine (sqlalchemey engine object): engine
+        tbl (text): table reference (incl. schema)
+
+    Returns:
+
+    """
+    strsql = f"""alter table {tbl} rename column geometry to geom"""
+    with engine.connect() as conn:
+        conn.execute(text(strsql))
+        conn.commit()
+
+
 def mainhandler(bucket_name, key, test):
     """With bucket_name and key the data can be downloaded from S3. It will return some
-    metrics of the file
+    metrics of the file.
+    With test = 'True' then the data will be loaded into test schema (ihm_krm_test) and refreshed in the geoserver
+    stora ihm_krm_test. The layers in the geoserver are not advertised (so not visible in layer preview window (except when logged in as admin))
 
     Args:
         bucket_name (string): S3 bucketname
@@ -139,34 +212,62 @@ def mainhandler(bucket_name, key, test):
     Returns:
         string : for now with some metrics of the retrieved file
     """
-    print(bucket_name)
+    print("test (True) of goedgekeurd (False)", test)
+    schema = "ihm_krm_test"
+    if test == "False":
+        schema = "ihm_krm"
 
-    # localfile declaration
-    localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
+    logging.info("schema is ", schema)
+    try:
+        # localfile declaration
+        if os.name == "nt":
+            localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
+            # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
+        else:
+            localfile = "/opt/pywps/geopackage/new.gpkg"
 
-    # get file from s3
-    s3fileprocessing(bucket_name, key, localfile)
-    print("data downloaded")
+        # get file from s3
+        # s3fileprocessing(bucket_name, key, localfile)
+        logging.info("data downloaded to", localfile)
+        print("localfile", localfile)
+        # read file with geopandas
+        gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
 
-    # read file with geopandas
-    gdf = gpd.read_file(localfile)
+        # derive some stats
+        nrrecords = len(gdf)
+        nrcolums = len(gdf.columns)
 
-    # derive some stats
-    nrrecords = len(gdf)
-    nrcolums = len(gdf.columns)
+        # load data in pg
+        string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
+        logging.info(string)
+        if test == "True":
+            succeeded = loaddata2pg(gdf, schema)
+            if succeeded:
+                string = (
+                    string
+                    + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
+                )
+        else:
+            succeeded = loaddata2pg(gdf, schema)
+            if succeeded:
+                string = (
+                    string + " loaded in production schema, and data service refreshed"
+                )
 
-    # load data in pg
-    string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
-    msg = loaddata2pg(gdf)
-    if msg:
-        string = string + " and loaded in database"
-    else:
-        string = string + " but failed to load into database"
-    return string
+    except:
+        string = "downloading file failed"
+    finally:
+        return string
+
+
+# this works, but ...
+# implement the test, what is expected there:
+# the current setup is such that there are x number of views associated with this
+# table, needs to be a testing environment.
 
 
 def test():
     bucket_name = "krm-validatie-data-floris"
     key = "geopackage/output.gpkg"
-    msg = mainhandler(bucket_name, key, True)
+    msg = mainhandler(bucket_name, key, "True")
     print(msg)
