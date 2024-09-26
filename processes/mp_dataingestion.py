@@ -217,6 +217,7 @@ def mainhandler(bucket_name, key, test):
     if test == "False":
         schema = "ihm_krm"
 
+    print(datetime.datetime.now())
     logging.info("schema is ", schema)
     try:
         # localfile declaration
