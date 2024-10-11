@@ -212,27 +212,28 @@ def mainhandler(bucket_name, key, test):
     Returns:
         string : for now with some metrics of the retrieved file
     """
-    print("test (True) of goedgekeurd (False)", test)
     schema = "ihm_krm_test"
     if test == "False":
-        schema = "ihm_krm"
+        # bear in mind, this should be changed into ihm_krm, but only after full approval of IHM
+        schema = "ihm_krm_test"
 
-    print(datetime.datetime.now())
     logging.info("schema is ", schema)
     try:
         # localfile declaration
         if os.name == "nt":
-            localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
+            localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
+            # localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
         else:
             localfile = "/opt/pywps/geopackage/new.gpkg"
 
         # get file from s3
-        # s3fileprocessing(bucket_name, key, localfile)
+        s3fileprocessing(bucket_name, key, localfile)
         logging.info("data downloaded to", localfile)
         print("localfile", localfile)
         # read file with geopandas
-        gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
+        # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
+        gdf = gpd.read_file(localfile)
 
         # derive some stats
         nrrecords = len(gdf)
@@ -240,6 +241,7 @@ def mainhandler(bucket_name, key, test):
 
         # load data in pg
         string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
+        print(string)
         logging.info(string)
         if test == "True":
             succeeded = loaddata2pg(gdf, schema)
@@ -249,7 +251,8 @@ def mainhandler(bucket_name, key, test):
                     + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
                 )
         else:
-            succeeded = loaddata2pg(gdf, schema)
+            # succeeded = loaddata2pg(gdf, schema)
+            succeeded = False
             if succeeded:
                 string = (
                     string + " loaded in production schema, and data service refreshed"

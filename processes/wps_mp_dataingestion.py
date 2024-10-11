@@ -42,6 +42,8 @@ from .mp_dataingestion import mainhandler
 # In case of acceptence
 # http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"bucketname": "krm-validatie-data-floris","key": "geopackage/output.gpkg","test": "False"}
 
+# http://localhost:5000/wps?service=wps&request=GetCapabilities&version=2.0.0
+
 
 class WPSMPDataIngestion(Process):
     def __init__(self):
