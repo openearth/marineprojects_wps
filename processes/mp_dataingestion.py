@@ -42,7 +42,8 @@ if os.name == "nt":
 else:
     fc = os.path.join(os.path.dirname(os.path.realpath(__file__)), "configuration.txt")
     if not os.path.exists(fc):
-        fc = "/opt/pywps/processes/configuration.txt"
+        fc = "/opt/pywps/configuration.txt"
+        logger.info("path to configuration", fc)
     # print("PG configpath", confpath)
     logger.info("path to configuration", fc)
 

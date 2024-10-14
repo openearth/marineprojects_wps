@@ -44,6 +44,9 @@ from .mp_dataingestion import mainhandler
 
 # http://localhost:5000/wps?service=wps&request=GetCapabilities&version=2.0.0
 
+# production environment
+# https://marineprojects.openearth.nl/wps?service=wps&version=1.0.0&request=GetCapabilities
+
 
 class WPSMPDataIngestion(Process):
     def __init__(self):
