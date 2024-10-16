@@ -12,7 +12,7 @@ dependencies:
   - geopandas=
   - fiona=
   - boto3=
+  - psycopg2-binary>=2
   - pip:
-      - psycopg2-binary>=2
       - pywps>=4
 

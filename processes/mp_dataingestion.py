@@ -216,7 +216,7 @@ def mainhandler(bucket_name, key, test):
     schema = "ihm_krm_test"
     if test == "False":
         # bear in mind, this should be changed into ihm_krm, but only after full approval of IHM
-        schema = "ihm_krm_test"
+        schema = "ihm_krm"
 
     logging.info("schema is ", schema)
     try:

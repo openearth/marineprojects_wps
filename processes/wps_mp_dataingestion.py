@@ -46,6 +46,7 @@ from .mp_dataingestion import mainhandler
 
 # production environment
 # https://marineprojects.openearth.nl/wps?service=wps&version=1.0.0&request=GetCapabilities
+# https://marineprojects.openearth.nl/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion&version=2.0.0&DataInputs=s3_inputs={"bucketname": "krm-validatie-data-floris","key": "geopackage/output.gpkg","test": "False"}
 
 
 class WPSMPDataIngestion(Process):
