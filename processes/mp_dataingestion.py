@@ -226,7 +226,7 @@ def mainhandler(bucket_name, key, test):
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
         else:
-            localfile = "./opt/pywps/geopackage/new.gpkg"
+            localfile = "/opt/pywps/geopackage/new.gpkg"
 
         # get file from s3
         s3fileprocessing(bucket_name, key, localfile)
