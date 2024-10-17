@@ -259,8 +259,7 @@ def mainhandler(bucket_name, key, test):
                     + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
                 )
         else:
-            # succeeded = loaddata2pg(gdf, schema)
-            succeeded = False
+            succeeded = loaddata2pg(gdf, schema)
             if succeeded:
                 string = (
                     string + " loaded in production schema, and data service refreshed"
