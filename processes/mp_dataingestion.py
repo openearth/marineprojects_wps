@@ -145,6 +145,7 @@ def loaddata2pg(gdf, schema):
         dt = datetime.date.today().strftime("%Y%m%d")
         # check what to do with copy of dataset of same day?
         print("schema", schema)
+        logging.info('schem is',schema)
         if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
             print("copy of table", schema + "." + "krm_actuele_dataset" + "_" + dt)
             strsql = f"""drop table {schema}.krm_actuele_dataset_{dt}"""
@@ -160,6 +161,7 @@ def loaddata2pg(gdf, schema):
                 "create copy of existing data and create",
                 schema + "." + "krm_actuele_dataset" + "_" + dt,
             )
+            logging.info("create copy of existing data and create", schema + "." + "krm_actuele_dataset" + "_" + dt)
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
@@ -174,6 +176,7 @@ def loaddata2pg(gdf, schema):
                 index=False,
             )
             print("creation of table done")
+            logging.info("creation of table done in schema", schema)
         session.close()
         engine.dispose()
 
@@ -184,7 +187,7 @@ def loaddata2pg(gdf, schema):
 
 
 def checkgeom(engine, tbl):
-    """This function creates rename a geometry column to geom (that is expected in geoserver)
+    """This function renames a geometry column to geom (that is expected in geoserver)
 
     Args:
         engine (sqlalchemey engine object): engine
@@ -194,6 +197,7 @@ def checkgeom(engine, tbl):
 
     """
     strsql = f"""alter table {tbl} rename column geometry to geom"""
+    logging.info('in checkgeom', strsql)
     with engine.connect() as conn:
         conn.execute(text(strsql))
         conn.commit()
@@ -273,6 +277,6 @@ def mainhandler(bucket_name, key, test):
 
 def test():
     bucket_name = "krm-validatie-data-floris"
-    key = "./geopackage/new.gpkg"
+    key = "geopackage/output.gpkg"
     msg = mainhandler(bucket_name, key, "True")
     print(msg)
