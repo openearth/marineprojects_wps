@@ -273,6 +273,6 @@ def mainhandler(bucket_name, key, test):
 
 def test():
     bucket_name = "krm-validatie-data-floris"
-    key = "geopackage/output.gpkg"
+    key = "./geopackage/new.gpkg"
     msg = mainhandler(bucket_name, key, "True")
     print(msg)
