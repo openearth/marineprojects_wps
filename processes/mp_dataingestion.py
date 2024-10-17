@@ -138,6 +138,7 @@ def loaddata2pg(gdf, schema):
             + ":5432/"
             + cf.get("PostGIS", "db")
         )
+        print('connection via', connstr)
         session, engine = establishconnection(None, connstr)
 
         # test if the dataset is already there
@@ -239,6 +240,7 @@ def mainhandler(bucket_name, key, test):
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
         gdf = gpd.read_file(localfile)
+        print('crs van de gpkg',gdf.crs)
 
         # derive some stats
         nrrecords = len(gdf)
@@ -247,6 +249,7 @@ def mainhandler(bucket_name, key, test):
         # load data in pg
         string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
         print(string)
+        print('status',test)
         logging.info(string)
         if test == "True":
             succeeded = loaddata2pg(gdf, schema)
