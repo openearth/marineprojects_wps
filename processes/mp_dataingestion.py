@@ -63,7 +63,7 @@ s3 = boto3.resource(
 )
 
 
-def establishconnection(fc, connectionsstring=None):
+def establishconnection(cf):
     """
     Set up a orm session to the target database with the connectionstring
     in the file that is passed
@@ -76,7 +76,6 @@ def establishconnection(fc, connectionsstring=None):
         database
     connectionstring:
         DESCRIPTION.
-        in case fc = none, a connectionstring can be passed
 
     Returns
     -------
@@ -85,12 +84,17 @@ def establishconnection(fc, connectionsstring=None):
         returns orm session
 
     """
-    if fc != None:
-        f = open(fc)
-        engine = create_engine(f.read(), echo=False)
-        f.close()
-    elif fc == None and connectionsstring != None:
-        engine = create_engine(connectionsstring, echo=False)
+    connstr = (
+        "postgresql+psycopg2://"
+        + cf.get("PostGIS", "user")
+        + ":"
+        + cf.get("PostGIS", "pass")
+        + "@"
+        + cf.get("PostGIS", "host")
+        + ":5432/"
+        + cf.get("PostGIS", "db")
+    ) 
+    engine = create_engine(connstr, echo=False)
     logger.info("connection setup")
     Session = sessionmaker(bind=engine)
     session = Session()
@@ -114,11 +118,10 @@ def s3fileprocessing(bucket_name, key, localfile):
         else:
             raise
 
-
-def loaddata2pg(gdf, schema):
+def loaddata2pg_production(gdf, schema):
     """This function creates a table based on the contents of the Geopandas Dataframe
        The function creates a copy of the data based on current datatime
-
+       Production version appends data to original table
     Args:
         gdf (GeoPandas dataframe): geodatafram
 
@@ -126,61 +129,104 @@ def loaddata2pg(gdf, schema):
         msg (boolean): boolean value indicating success (True5) or not (False)
     """
     msg = True
-
+    strmsg = ''
+    session, engine = establishconnection(cf)
     try:
-        connstr = (
-            "postgresql+psycopg2://"
-            + cf.get("PostGIS", "user")
-            + ":"
-            + cf.get("PostGIS", "pass")
-            + "@"
-            + cf.get("PostGIS", "host")
-            + ":5432/"
-            + cf.get("PostGIS", "db")
-        )
-        print('connection via', connstr)
-        session, engine = establishconnection(None, connstr)
-
-        # test if the dataset is already there
+       # test if the dataset is already there
         insp = inspect(engine)
         dt = datetime.date.today().strftime("%Y%m%d")
         # check what to do with copy of dataset of same day?
         print("schema", schema)
         logging.info('schem is',schema)
         if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
-            print("copy of table", schema + "." + "krm_actuele_dataset" + "_" + dt)
+            strmsg = "copy of table" + schema + "." + "krm_actuele_dataset" + "_" + dt
+            print(strmsg)
             strsql = f"""drop table {schema}.krm_actuele_dataset_{dt}"""
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
+        else:
+            strmsg = "table not found" + schema + "." + "krm_actuele_dataset" + "_" + dt
+            print(strmsg)
 
         # this should always happen, otherwise apparently a new instance has been started
         if insp.has_table("krm_actuele_dataset", schema=schema):
             # rename if true
             strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from ihm_krm.krm_actuele_dataset"""
-            print(
-                "create copy of existing data and create",
-                schema + "." + "krm_actuele_dataset" + "_" + dt,
-            )
+            strmsg = "create copy of existing data and create"+ schema + "." + "krm_actuele_dataset" + "_" + dt,
+            print(strmsg)
+
             logging.info("create copy of existing data and create", schema + "." + "krm_actuele_dataset" + "_" + dt)
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
+
+            session.execute(text("COMMIT"))
+            strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
+            session.execute(text(strsql))
+            strmsg = 'Dropping GIST Index if exists'
+            print(strmsg)
+        else:
+            print('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
+
+        # from here the passed GeoPandas dataframe is appended in to the existing table
+        strmsg = 'copy gdf to pg'
+        print(strmsg)
+
+        gdf.to_postgis(
+            "krm_actuele_dataset",
+            engine,
+            schema=schema,
+            if_exists="append",
+            index=False,
+        )
+
+        print("creation of table done, incl. index GIST on geom")
+        logging.info("creation of table done in schema", schema)
+        session.close()
+
+        # call the checkgeom function, this checks if geom column is there and if not, will rename geometry column to geom column
+        checkgeom(engine, ".".join([schema, "krm_actuele_dataset"]))
+        engine.dispose()
+    except Exception:
+        print('Exception raised',Exception)
+        msg = False
+    return msg
+
+
+def loaddata2pg_test(gdf, schema):
+    """This function creates a table based on the contents of the Geopandas Dataframe
+       The function creates a copy of the data based on current datatime
+       Test version only replaces data 
+    Args:
+        gdf (GeoPandas dataframe): geodatafram
+
+    Returns:
+        msg (boolean): boolean value indicating success (True5) or not (False)
+    """
+    msg = True
+    session, engine = establishconnection(cf)
+    try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
-        with engine.connect() as con:
-            gdf.to_postgis(
-                "krm_actuele_dataset",
-                con,
-                schema=schema,
-                if_exists="replace",
-                index=False,
-            )
-            print("creation of table done")
-            logging.info("creation of table done in schema", schema)
+        session.execute(text("COMMIT"))
+        strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
+        session.execute(text(strsql))
+ 
+        gdf.to_postgis(
+            "krm_actuele_dataset",
+            engine,
+            schema=schema,
+            if_exists="replace",
+            index=False,
+        )
+
+        print("creation of table done")
+        logging.info("creation of table done in schema", schema)
         session.close()
         engine.dispose()
 
+        # call the checkgeom function, this checks if geom column is there and if not, will rename geometry column to geom column
         checkgeom(engine, ".".join([schema, "krm_actuele_dataset"]))
     except:
         msg = False
@@ -227,7 +273,7 @@ def mainhandler(bucket_name, key, test):
     try:
         # localfile declaration
         if os.name == "nt":
-            localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
+            localfile = r"C:\projectinfo\nl\RWS\sito2024\FAIRwaterdata\krmvalidatie\krm_actuele_dataset_2022.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
         else:
@@ -237,6 +283,7 @@ def mainhandler(bucket_name, key, test):
         s3fileprocessing(bucket_name, key, localfile)
         logging.info("data downloaded to", localfile)
         print("localfile", localfile)
+
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
         gdf = gpd.read_file(localfile)
@@ -252,14 +299,14 @@ def mainhandler(bucket_name, key, test):
         print('status',test)
         logging.info(string)
         if test == "True":
-            succeeded = loaddata2pg(gdf, schema)
+            succeeded = loaddata2pg_test(gdf, schema)
             if succeeded:
                 string = (
                     string
                     + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
                 )
         else:
-            succeeded = loaddata2pg(gdf, schema)
+            succeeded = loaddata2pg_production(gdf, schema)
             if succeeded:
                 string = (
                     string + " loaded in production schema, and data service refreshed"
@@ -280,5 +327,9 @@ def mainhandler(bucket_name, key, test):
 def test():
     bucket_name = "krm-validatie-data-floris"
     key = "geopackage/output.gpkg"
-    msg = mainhandler(bucket_name, key, "True")
+    msg = mainhandler(bucket_name, key, "False")
+    print(msg)
+    # alternatively
+    key = "C:\projectinfo\nl\RWS\sito2024\FAIRwaterdata\krmvalidatie\krm_actuele_dataset_2022.gpkg"
+
     print(msg)
