@@ -173,6 +173,13 @@ def loaddata2pg_production(gdf, schema):
         strmsg = 'copy gdf to pg'
         print(strmsg)
 
+        # check columnname geom
+        if 'geometry' in gdf.columns:
+            gdf.rename_geometry('geom',inplace=True)
+        
+        # check the SRID of the table, needs to match the SRID of the GDF
+        checktableSRID(schema)
+        
         gdf.to_postgis(
             "krm_actuele_dataset",
             engine,
@@ -213,6 +220,10 @@ def loaddata2pg_test(gdf, schema):
         strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
         session.execute(text(strsql))
  
+        # check columnname geom
+        if 'geometry' in gdf.columns:
+            gdf.rename_geometry('geom',inplace=True)
+
         gdf.to_postgis(
             "krm_actuele_dataset",
             engine,
@@ -220,6 +231,9 @@ def loaddata2pg_test(gdf, schema):
             if_exists="replace",
             index=False,
         )
+
+        #checks the srid of the entire table and sets if necessary
+        checktableSRID(schema)
 
         print("creation of table done")
         logging.info("creation of table done in schema", schema)
@@ -231,6 +245,28 @@ def loaddata2pg_test(gdf, schema):
     except:
         msg = False
     return msg
+
+def checktableSRID(schema, srid=4258):
+    """This function renames a set the entire table to a given srid (defaults to 4258)
+
+    Args:
+        schema (string): target schema
+        srid (integer) : EPSG code of the spatial reference ID
+    Returns:
+    """
+    session, engine = establishconnection(cf)
+    # check srid of target table
+    strsql = f"""select find_srid('{schema}', 'krm_actuele_dataset', 'geom')""" 
+    with engine.connect() as conn:
+        srid = conn.execute(text(strsql)).fetchone()[0]
+        conn.commit()
+    if srid == 0:
+        strsql = f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {srid})""" 
+        conn.execute(text(strsql))
+        conn.commit()
+        print('database table set to srid 4258')
+    session.close()
+    engine.dispose()
 
 
 def checkgeom(engine, tbl):
