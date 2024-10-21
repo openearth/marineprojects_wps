@@ -153,10 +153,10 @@ def loaddata2pg_production(gdf, schema):
         if insp.has_table("krm_actuele_dataset", schema=schema):
             # rename if true
             strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from ihm_krm.krm_actuele_dataset"""
-            strmsg = "create copy of existing data and create"+ schema + "." + "krm_actuele_dataset" + "_" + dt,
+            strmsg = "create copy of existing data and create "+ schema + "." + "krm_actuele_dataset" + "_" + dt,
             print(strmsg)
 
-            logging.info("create copy of existing data and create", schema + "." + "krm_actuele_dataset" + "_" + dt)
+            logging.info("create copy of existing data and create ", schema + "." + "krm_actuele_dataset" + "_" + dt)
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
@@ -273,7 +273,7 @@ def mainhandler(bucket_name, key, test):
     try:
         # localfile declaration
         if os.name == "nt":
-            localfile = r"C:\projectinfo\nl\RWS\sito2024\FAIRwaterdata\krmvalidatie\krm_actuele_dataset_2022.gpkg"
+            localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
             # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
         else:
@@ -325,11 +325,9 @@ def mainhandler(bucket_name, key, test):
 
 
 def test():
-    bucket_name = "krm-validatie-data-floris"
-    key = "geopackage/output.gpkg"
-    msg = mainhandler(bucket_name, key, "False")
+    bucket_name = "krm-validatie-data-prod"
+    key = "geopackages_history/krm_actuele_dataset_new.gpkg"
+    msg = mainhandler(bucket_name, key, "True")
     print(msg)
     # alternatively
-    key = "C:\projectinfo\nl\RWS\sito2024\FAIRwaterdata\krmvalidatie\krm_actuele_dataset_2022.gpkg"
-
     print(msg)
