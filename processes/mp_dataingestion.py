@@ -65,7 +65,7 @@ s3 = boto3.resource(
 
 def establishconnection(cf):
     """
-    Set up a orm session to the target database with the connectionstring
+    Set up an orm session to the target database with the connectionstring
     in the file that is passed
 
     Parameters
@@ -81,7 +81,7 @@ def establishconnection(cf):
     -------
     session : ormsession
         DESCRIPTION.
-        returns orm session
+        returns orm session and engine
 
     """
     connstr = (
@@ -170,10 +170,7 @@ def loaddata2pg_production(gdf, schema):
             print('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
 
         # from here the passed GeoPandas dataframe is appended in to the existing table
-        strmsg = 'copy gdf to pg'
-        print(strmsg)
-
-        # check columnname geom
+        # first sanity check on columnname of the geometry column, should be geom
         if 'geometry' in gdf.columns:
             gdf.rename_geometry('geom',inplace=True)
         
@@ -188,12 +185,14 @@ def loaddata2pg_production(gdf, schema):
             index=False,
         )
 
-        print("creation of table done, incl. index GIST on geom")
+        # set index with GIST on geom column
+        session.execute(text("COMMIT"))
+        strsql = f'CREATE INDEX idx_krm_actuele_dataset_geometry ON {schema}.krm_actuele_dataset USING GIST (geom);' 
+        session.execute(text(strsql))        
+
+        print("data appended to table, set index GIST on geom")
         logging.info("creation of table done in schema", schema)
         session.close()
-
-        # call the checkgeom function, this checks if geom column is there and if not, will rename geometry column to geom column
-        checkgeom(engine, ".".join([schema, "krm_actuele_dataset"]))
         engine.dispose()
     except Exception:
         print('Exception raised',Exception)
@@ -235,13 +234,10 @@ def loaddata2pg_test(gdf, schema):
         #checks the srid of the entire table and sets if necessary
         checktableSRID(schema)
 
-        print("creation of table done")
+        # close session and dispose the current engine        
         logging.info("creation of table done in schema", schema)
         session.close()
         engine.dispose()
-
-        # call the checkgeom function, this checks if geom column is there and if not, will rename geometry column to geom column
-        checkgeom(engine, ".".join([schema, "krm_actuele_dataset"]))
     except:
         msg = False
     return msg
@@ -251,10 +247,13 @@ def checktableSRID(schema, srid=4258):
 
     Args:
         schema (string): target schema
-        srid (integer) : EPSG code of the spatial reference ID
+        srid (integer) : EPSG code of the spatial reference ID, defaults to 4258
     Returns:
     """
+
+    # setup connection to the database
     session, engine = establishconnection(cf)
+
     # check srid of target table
     strsql = f"""select find_srid('{schema}', 'krm_actuele_dataset', 'geom')""" 
     with engine.connect() as conn:
@@ -265,26 +264,11 @@ def checktableSRID(schema, srid=4258):
         conn.execute(text(strsql))
         conn.commit()
         print('database table set to srid 4258')
+
+    # close session and dispose the current engine
     session.close()
     engine.dispose()
-
-
-def checkgeom(engine, tbl):
-    """This function renames a geometry column to geom (that is expected in geoserver)
-
-    Args:
-        engine (sqlalchemey engine object): engine
-        tbl (text): table reference (incl. schema)
-
-    Returns:
-
-    """
-    strsql = f"""alter table {tbl} rename column geometry to geom"""
-    logging.info('in checkgeom', strsql)
-    with engine.connect() as conn:
-        conn.execute(text(strsql))
-        conn.commit()
-
+    return
 
 def mainhandler(bucket_name, key, test):
     """With bucket_name and key the data can be downloaded from S3. It will return some
@@ -310,8 +294,6 @@ def mainhandler(bucket_name, key, test):
         # localfile declaration
         if os.name == "nt":
             localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
-            # localfile = r"C:\develop\marineprojects_wps\geopackage\new_volledig.gpkg"
-            # localfile = r"C:\develop\marineprojects_wps\geopackage\new_onvolledig.gpkg"
         else:
             localfile = "/opt/pywps/geopackage/new.gpkg"
 
@@ -323,7 +305,6 @@ def mainhandler(bucket_name, key, test):
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
         gdf = gpd.read_file(localfile)
-        print('crs van de gpkg',gdf.crs)
 
         # derive some stats
         nrrecords = len(gdf)
@@ -354,12 +335,6 @@ def mainhandler(bucket_name, key, test):
         return string
 
 
-# this works, but ...
-# implement the test, what is expected there:
-# the current setup is such that there are x number of views associated with this
-# table, needs to be a testing environment.
-
-
 def test():
     bucket_name = "krm-validatie-data-prod"
     key = "geopackages_history/krm_actuele_dataset_new.gpkg"
@@ -367,3 +342,4 @@ def test():
     print(msg)
     # alternatively
     print(msg)
+
