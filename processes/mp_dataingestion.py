@@ -213,7 +213,7 @@ def loaddata2pg_test(gdf, schema):
     """
     msg = True
     session, engine = establishconnection(cf)
-    logger.info('gdf passed to test')
+    logger.info('gdf passed to test schema',schema)
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
