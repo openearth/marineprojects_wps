@@ -220,10 +220,11 @@ def loaddata2pg_test(gdf, schema):
         session.execute(text("COMMIT"))
         strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
         session.execute(text(strsql))
- 
+        logger.info('loaddata2pg_test: index dropped')
         # check columnname geom
         if 'geometry' in gdf.columns:
             gdf.rename_geometry('geom',inplace=True)
+            logger.info('loaddata2pg_test: converted geometry to geom')
 
         gdf.to_postgis(
             "krm_actuele_dataset",
@@ -262,6 +263,7 @@ def checktableSRID(schema, srid=4258):
     with engine.connect() as conn:
         srid = conn.execute(text(strsql)).fetchone()[0]
         conn.commit()
+        logger.info(f'database table {srid}')
     if srid == 0:
         strsql = f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {srid})""" 
         conn.execute(text(strsql))
@@ -302,8 +304,9 @@ def mainhandler(bucket_name, key, test):
 
         # get file from s3
         s3fileprocessing(bucket_name, key, localfile)
-        logger.info("data downloaded to", localfile)
-        #print("localfile", localfile)
+        msg = f"data downloaded to {localfile}"
+        logger.info(msg)
+        
 
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
