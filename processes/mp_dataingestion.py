@@ -114,7 +114,7 @@ def s3fileprocessing(bucket_name, key, localfile):
         s3.Bucket(bucket_name).download_file(key, localfile)
     except ClientError as e:
         if e.response["Error"]["Code"] == "404":
-            print("The object does not exist.")
+            logger.info("The object does not exist.")
         else:
             raise
 
@@ -136,25 +136,25 @@ def loaddata2pg_production(gdf, schema):
         insp = inspect(engine)
         dt = datetime.date.today().strftime("%Y%m%d")
         # check what to do with copy of dataset of same day?
-        print("schema", schema)
+        #print("schema", schema)
         logging.info('schem is',schema)
         if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
             strmsg = "copy of table" + schema + "." + "krm_actuele_dataset" + "_" + dt
-            print(strmsg)
+            logger.info(strmsg)
             strsql = f"""drop table {schema}.krm_actuele_dataset_{dt}"""
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
         else:
             strmsg = "table not found" + schema + "." + "krm_actuele_dataset" + "_" + dt
-            print(strmsg)
+            logger.info(strmsg)
 
         # this should always happen, otherwise apparently a new instance has been started
         if insp.has_table("krm_actuele_dataset", schema=schema):
             # rename if true
             strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from ihm_krm.krm_actuele_dataset"""
             strmsg = "create copy of existing data and create "+ schema + "." + "krm_actuele_dataset" + "_" + dt,
-            print(strmsg)
+            logger.info(strmsg)
 
             logging.info("create copy of existing data and create ", schema + "." + "krm_actuele_dataset" + "_" + dt)
             with engine.connect() as conn:
@@ -165,9 +165,9 @@ def loaddata2pg_production(gdf, schema):
             strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
             session.execute(text(strsql))
             strmsg = 'Dropping GIST Index if exists'
-            print(strmsg)
+            logger.info(strmsg)
         else:
-            print('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
+            logger.info('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
 
         # from here the passed GeoPandas dataframe is appended in to the existing table
         # first sanity check on columnname of the geometry column, should be geom
@@ -195,7 +195,7 @@ def loaddata2pg_production(gdf, schema):
         session.close()
         engine.dispose()
     except Exception:
-        print('Exception raised',Exception)
+        logger.info('Exception raised',Exception)
         msg = False
     return msg
 
@@ -299,8 +299,8 @@ def mainhandler(bucket_name, key, test):
 
         # get file from s3
         s3fileprocessing(bucket_name, key, localfile)
-        logging.info("data downloaded to", localfile)
-        print("localfile", localfile)
+        logger.info("data downloaded to", localfile)
+        #print("localfile", localfile)
 
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
@@ -312,9 +312,7 @@ def mainhandler(bucket_name, key, test):
 
         # load data in pg
         string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
-        print(string)
-        print('status',test)
-        logging.info(string)
+        logger.info(string)
         if test == "True":
             succeeded = loaddata2pg_test(gdf, schema)
             if succeeded:
@@ -332,6 +330,7 @@ def mainhandler(bucket_name, key, test):
     except:
         string = "downloading file failed"
     finally:
+        logger.info(string)
         return string
 
 
@@ -339,7 +338,5 @@ def test():
     bucket_name = "krm-validatie-data-prod"
     key = "geopackages_history/krm_actuele_dataset_new.gpkg"
     msg = mainhandler(bucket_name, key, "True")
-    print(msg)
-    # alternatively
-    print(msg)
+    logger.info(msg)
 
