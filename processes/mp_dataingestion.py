@@ -213,7 +213,7 @@ def loaddata2pg_test(gdf, schema):
     """
     msg = True
     session, engine = establishconnection(cf)
-    logger.info('gdf passed to test schema',schema)
+    logger.info('gdf passed to test schema')
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
@@ -237,11 +237,12 @@ def loaddata2pg_test(gdf, schema):
         checktableSRID(schema)
 
         # close session and dispose the current engine        
-        logging.info("creation of table done in schema", schema)
+        logging.info("loaddata2pg_test: creation of table done in schema")
         session.close()
         engine.dispose()
     except:
         msg = False
+        logger.info('loaddata2pg_test fout')
     return msg
 
 def checktableSRID(schema, srid=4258):
@@ -313,9 +314,9 @@ def mainhandler(bucket_name, key, test):
         nrcolums = len(gdf.columns)
 
         # load data in pg
-        string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
+        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
         logger.info(string)
-        logger.info('the value of test is', test)
+        logger.info(f'the value of test is {test}')
         if test == 'True':
             succeeded = loaddata2pg_test(gdf, schema)
             if succeeded:
