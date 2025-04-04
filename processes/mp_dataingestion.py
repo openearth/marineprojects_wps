@@ -241,9 +241,10 @@ def loaddata2pg_test(gdf, schema):
         logging.info("loaddata2pg_test: creation of table done in schema")
         session.close()
         engine.dispose()
-    except:
+    except Exception as e:# Log the exception with traceback        
         msg = False
-        logger.info('loaddata2pg_test fout')
+        logger.exception("An unexpected error occurred: %s", e)
+        logger.info(f'loaddata2pg_test fout: {e}')
     return msg
 
 def checktableSRID(schema, srid=4258):
