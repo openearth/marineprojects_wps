@@ -131,7 +131,7 @@ def loaddata2pg_production(gdf, schema):
     msg = True
     strmsg = ''
     session, engine = establishconnection(cf)
-    logger.info('gdf passed to production with srid',gdf.crs.name)
+    logger.info('gdf passed to production')
     try:
        # test if the dataset is already there
         insp = inspect(engine)
@@ -213,7 +213,7 @@ def loaddata2pg_test(gdf, schema):
     """
     msg = True
     session, engine = establishconnection(cf)
-    logger.info('gdf passed with srid',gdf.crs.name)
+    logger.info('gdf passed to test')
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
@@ -265,7 +265,7 @@ def checktableSRID(schema, srid=4258):
         strsql = f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {srid})""" 
         conn.execute(text(strsql))
         conn.commit()
-        print('database table set to srid 4258')
+        logger.info('database table set to srid 4258')
 
     # close session and dispose the current engine
     session.close()
