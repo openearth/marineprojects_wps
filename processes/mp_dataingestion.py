@@ -131,6 +131,7 @@ def loaddata2pg_production(gdf, schema):
     msg = True
     strmsg = ''
     session, engine = establishconnection(cf)
+    logger.info('gdf passed to production with srid',gdf.crs.name)
     try:
        # test if the dataset is already there
         insp = inspect(engine)
@@ -212,6 +213,7 @@ def loaddata2pg_test(gdf, schema):
     """
     msg = True
     session, engine = establishconnection(cf)
+    logger.info('gdf passed with srid',gdf.crs.name)
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
@@ -313,19 +315,22 @@ def mainhandler(bucket_name, key, test):
         # load data in pg
         string = f"File ({key}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
         logger.info(string)
-        if test == "True":
+        logger.info('the value of test is', test)
+        if test == 'True':
             succeeded = loaddata2pg_test(gdf, schema)
             if succeeded:
                 string = (
                     string
                     + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
                 )
-        else:
+        elif test == 'False':
             succeeded = loaddata2pg_production(gdf, schema)
             if succeeded:
                 string = (
                     string + " loaded in production schema, and data service refreshed"
                 )
+        else:
+            logger.info('value of test',test)
 
     except:
         string = "downloading file failed"
