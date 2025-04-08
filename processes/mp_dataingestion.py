@@ -191,7 +191,7 @@ def loaddata2pg_production(gdf, schema):
         strsql = f'CREATE INDEX idx_krm_actuele_dataset_geometry ON {schema}.krm_actuele_dataset USING GIST (geom);' 
         session.execute(text(strsql))        
 
-        print("data appended to table, set index GIST on geom")
+        #print("data appended to table, set index GIST on geom")
         logging.info("creation of table done in schema", schema)
         session.close()
         engine.dispose()
