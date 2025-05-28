@@ -162,12 +162,9 @@ def loaddata2pg_production(gdf, schema):
                 conn.execute(text(strsql))
                 conn.commit()
 
-            #session.execute(text("COMMIT"))
+            session.execute(text("COMMIT"))
             strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
-            with engine.connect() as conn:
-                conn.execute(text(strsql))
-                conn.commit()            
-            #session.execute(text(strsql))
+            session.execute(text(strsql))
             strmsg = 'Dropping GIST Index if exists'
             logger.info(strmsg)
         else:
