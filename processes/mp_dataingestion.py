@@ -138,7 +138,7 @@ def loaddata2pg_production(gdf, schema):
         dt = datetime.date.today().strftime("%Y%m%d")
         # check what to do with copy of dataset of same day?
         #print("schema", schema)
-        logging.info('schem is',schema)
+        logging.info('schema is',schema)
         if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
             strmsg = "copy of table" + schema + "." + "krm_actuele_dataset" + "_" + dt
             logger.info(strmsg)
@@ -147,7 +147,7 @@ def loaddata2pg_production(gdf, schema):
                 conn.execute(text(strsql))
                 conn.commit()
         else:
-            strmsg = "table not found" + schema + "." + "krm_actuele_dataset" + "_" + dt
+            strmsg = "table not found " + schema + "." + "krm_actuele_dataset" + "_" + dt
             logger.info(strmsg)
 
         # this should always happen, otherwise apparently a new instance has been started
@@ -162,9 +162,12 @@ def loaddata2pg_production(gdf, schema):
                 conn.execute(text(strsql))
                 conn.commit()
 
-            session.execute(text("COMMIT"))
+            #session.execute(text("COMMIT"))
             strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
-            session.execute(text(strsql))
+            with engine.connect() as conn:
+                conn.execute(text(strsql))
+                conn.commit()            
+            #session.execute(text(strsql))
             strmsg = 'Dropping GIST Index if exists'
             logger.info(strmsg)
         else:
@@ -187,16 +190,20 @@ def loaddata2pg_production(gdf, schema):
         )
 
         # set index with GIST on geom column
-        session.execute(text("COMMIT"))
+        #session.execute(text("COMMIT"))
         strsql = f'CREATE INDEX idx_krm_actuele_dataset_geometry ON {schema}.krm_actuele_dataset USING GIST (geom);' 
-        session.execute(text(strsql))        
+        #session.execute(text(strsql))        
+        with engine.connect() as conn:
+            conn.execute(text(strsql))
+            conn.commit()
 
         #print("data appended to table, set index GIST on geom")
         logging.info("creation of table done in schema", schema)
         session.close()
         engine.dispose()
-    except Exception:
-        logger.info('Exception raised',Exception)
+    except Exception as e:
+        logger.error(f'Exception raised: {str(e)}')
+        logger.exception("Full traceback:") 
         msg = False
     return msg
 
@@ -316,9 +323,10 @@ def mainhandler(bucket_name, key, test):
         # derive some stats
         nrrecords = len(gdf)
         nrcolums = len(gdf.columns)
+        gdfcrs = gdf.crs
 
         # load data in pg
-        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns"
+        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
         logger.info(string)
         logger.info(f'the value of test is {test}')
         if test == 'True':
