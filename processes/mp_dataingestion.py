@@ -178,8 +178,8 @@ def loaddata2pg_production(gdf, schema):
         # check the SRID of the table, needs to match the SRID of the GDF
         checktableSRID(schema)
         
-        # set nodata value
-        gdf = gdf.fillna(value=None)
+        # replace all textvalues 'nan' to null
+        gdf = gdf.replace({'nan': None},inplace=True)
         
         # load geodataframe in postgis
         gdf.to_postgis(
@@ -234,8 +234,8 @@ def loaddata2pg_test(gdf, schema):
             gdf.rename_geometry('geom',inplace=True)
             logger.info('loaddata2pg_test: converted geometry to geom')
 
-        # set nodata value 
-        gdf = gdf.fillna(value=None)
+        # replace all textvalues 'nan' to null
+        gdf = gdf.replace({'nan': None},inplace=True)
 
         # load geodataframe in postgis
         gdf.to_postgis(
