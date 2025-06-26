@@ -179,7 +179,7 @@ def loaddata2pg_production(gdf, schema):
         checktableSRID(schema)
         
         # replace all textvalues 'nan' to null
-        gdf = gdf.replace({'nan': None},inplace=True)
+        gdf = gdf.replace({'nan': None})
         
         # load geodataframe in postgis
         gdf.to_postgis(
@@ -235,7 +235,7 @@ def loaddata2pg_test(gdf, schema):
             logger.info('loaddata2pg_test: converted geometry to geom')
 
         # replace all textvalues 'nan' to null
-        gdf = gdf.replace({'nan': None},inplace=True)
+        gdf = gdf.replace({'nan': None})
 
         # load geodataframe in postgis
         gdf.to_postgis(
