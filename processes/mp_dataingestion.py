@@ -126,7 +126,7 @@ def loaddata2pg_production(gdf, schema):
         gdf (GeoPandas dataframe): geodatafram
 
     Returns:
-        msg (boolean): boolean value indicating success (True5) or not (False)
+        msg (boolean): boolean value indicating success (True) or not (False)
     """
     msg = True
     strmsg = ''
@@ -153,7 +153,7 @@ def loaddata2pg_production(gdf, schema):
         # this should always happen, otherwise apparently a new instance has been started
         if insp.has_table("krm_actuele_dataset", schema=schema):
             # rename if true
-            strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from ihm_krm.krm_actuele_dataset"""
+            strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from {schema}.krm_actuele_dataset"""
             strmsg = "create copy of existing data and create "+ schema + "." + "krm_actuele_dataset" + "_" + dt,
             logger.info(strmsg)
 
@@ -349,6 +349,58 @@ def mainhandler(bucket_name, key, test):
                 )
         else:
             logger.info('value of test',test)
+
+    except:
+        string = "downloading file failed"
+    finally:
+        logger.info(string)
+        return string
+
+
+def mainhandler_dev(bucket_name, key):
+    """Dev ingestion handler.
+
+    Downloads the provided GeoPackage from S3, reads it with GeoPandas and loads it into
+    the dev schema using the production-style loader (daily backup + append).
+
+    Args:
+        bucket_name (string): S3 bucketname
+        key (string):         Key (full path and filename)
+
+    Returns:
+        string : for now with some metrics of the retrieved file
+    """
+
+    schema = "ihm_krm_dev"
+    logging.info("schema is ", schema)
+    try:
+        # localfile declaration
+        if os.name == "nt":
+            localfile = r"C:\develop\marineprojects_wps\geopackage\new.gpkg"
+        else:
+            localfile = "/opt/pywps/geopackage/new.gpkg"
+
+        # get file from s3
+        s3fileprocessing(bucket_name, key, localfile)
+        msg = f"data downloaded to {localfile}"
+        logger.info(msg)
+
+        # read file with geopandas
+        # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
+        gdf = gpd.read_file(localfile)
+
+        # derive some stats
+        nrrecords = len(gdf)
+        nrcolums = len(gdf.columns)
+        gdfcrs = gdf.crs
+
+        # load data in pg
+        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
+        logger.info(string)
+
+        succeeded = loaddata2pg_production(gdf, schema)
+        if succeeded:
+            string = string + " loaded in dev schema, and data service refreshed"
 
     except:
         string = "downloading file failed"

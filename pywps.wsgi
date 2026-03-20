@@ -44,11 +44,13 @@ from pywps.app.Service import Service
 # Ultimate question
 from processes.ultimate_question import UltimateQuestion
 from processes.wps_mp_dataingestion import WPSMPDataIngestion
+from processes.wps_mp_dataingestion_dev import WPSMPDataIngestionDev
 
 # TODO add the proces in the processes list
 processes = [
     UltimateQuestion(),
     WPSMPDataIngestion(),
+    WPSMPDataIngestionDev(),
 ]
 
 # Description used in template
