@@ -398,7 +398,7 @@ def mainhandler_dev(bucket_name, key):
         string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
         logger.info(string)
 
-        succeeded = loaddata2pg_production(gdf, schema)
+        succeeded = loaddata2pg_test(gdf, schema)
         if succeeded:
             string = string + " loaded in dev schema, and data service refreshed"
 
