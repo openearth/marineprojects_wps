@@ -37,7 +37,11 @@ from .mp_dataingestion import mainhandler_dev
 
 # example requests
 # In case of dev
-# http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion_dev&version=2.0.0&DataInputs=s3_inputs={"bucketname":"krm-validatie-data-floris","key":"geopackage/output.gpkg"}
+# http://localhost:5000/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion_dev&version=2.0.0&DataInputs=s3_inputs={"bucketname":"krm-validatie-data-dev","key":"geopackage/output.gpkg"}
+
+# production environment
+# https://marineprojects.openearth.nl/wps?request=GetCapabilities&service=WPS&version=2.0.0
+# https://marineprojects.openearth.nl/wps?request=Execute&service=WPS&identifier=wps_mp_dataingestion_dev&version=2.0.0&DataInputs=s3_inputs={"bucketname":"krm-validatie-data-dev","key":"geopackage/output.gpkg"}
 
 
 class WPSMPDataIngestionDev(Process):
