@@ -36,6 +36,9 @@ import geoalchemy2
 
 logger = logging.getLogger("PYWPS")
 
+SPATIAL_INDEX_NAME = "idx_krm_actuele_dataset_geometry"
+APPEND_REINDEX_THRESHOLD = 0.30
+
 # read config
 if os.name == "nt":
     fc = r"C:\develop\marineprojects_wps\configuration.txt"
@@ -118,6 +121,60 @@ def s3fileprocessing(bucket_name, key, localfile):
         else:
             raise
 
+
+def _table_row_count(engine, schema, table_name):
+    """Return the number of rows in a schema-qualified table."""
+    strsql = f'SELECT COUNT(*) FROM "{schema}"."{table_name}";'
+    with engine.connect() as conn:
+        rowcount = conn.execute(text(strsql)).scalar_one()
+    return rowcount
+
+
+def _index_exists(engine, schema, index_name):
+    """Return True when an index exists in the provided schema."""
+    strsql = """
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = :schema_name AND indexname = :index_name
+        LIMIT 1;
+    """
+    with engine.connect() as conn:
+        found = conn.execute(
+            text(strsql),
+            {"schema_name": schema, "index_name": index_name},
+        ).first()
+    return found is not None
+
+
+def _drop_spatial_index(engine, schema, index_name=SPATIAL_INDEX_NAME, concurrently=True):
+    """Drop spatial index with optional CONCURRENTLY outside transaction blocks."""
+    conc = " CONCURRENTLY" if concurrently else ""
+    strsql = f'DROP INDEX{conc} IF EXISTS "{schema}"."{index_name}";'
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text(strsql))
+    logger.info(f"dropped index if present: {schema}.{index_name}")
+
+
+def _create_spatial_index(
+    engine,
+    schema,
+    table_name="krm_actuele_dataset",
+    geometry_column="geom",
+    index_name=SPATIAL_INDEX_NAME,
+    concurrently=True,
+):
+    """Create spatial GIST index and refresh planner stats."""
+    conc = " CONCURRENTLY" if concurrently else ""
+    str_create = (
+        f'CREATE INDEX{conc} IF NOT EXISTS "{index_name}" '
+        f'ON "{schema}"."{table_name}" USING GIST ("{geometry_column}");'
+    )
+    str_analyze = f'ANALYZE "{schema}"."{table_name}";'
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        conn.execute(text(str_create))
+        conn.execute(text(str_analyze))
+    logger.info(f"created index and analyzed table: {schema}.{index_name}")
+
 def loaddata2pg_production(gdf, schema):
     """This function creates a table based on the contents of the Geopandas Dataframe
        The function creates a copy of the data based on current datatime
@@ -170,6 +227,24 @@ def loaddata2pg_production(gdf, schema):
         else:
             logger.info('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
 
+        existing_rows = _table_row_count(engine, schema, "krm_actuele_dataset")
+        incoming_rows = len(gdf)
+        should_reindex = existing_rows > 0 and (
+            incoming_rows / existing_rows >= APPEND_REINDEX_THRESHOLD
+        )
+
+        if should_reindex:
+            logger.info(
+                f"incoming batch is large enough to rebuild index "
+                f"({incoming_rows} incoming, {existing_rows} existing)"
+            )
+            _drop_spatial_index(engine, schema, concurrently=True)
+        else:
+            logger.info(
+                f"keeping existing index during append "
+                f"({incoming_rows} incoming, {existing_rows} existing)"
+            )
+
         # from here the passed GeoPandas dataframe is appended in to the existing table
         # first sanity check on columnname of the geometry column, should be geom
         if 'geometry' in gdf.columns:
@@ -190,13 +265,12 @@ def loaddata2pg_production(gdf, schema):
             index=False,
         )
 
-        # set index with GIST on geom column
-        #session.execute(text("COMMIT"))
-        strsql = f'CREATE INDEX idx_krm_actuele_dataset_geometry ON {schema}.krm_actuele_dataset USING GIST (geom);' 
-        #session.execute(text(strsql))        
-        with engine.connect() as conn:
-            conn.execute(text(strsql))
-            conn.commit()
+        # Recreate index only for large appends or when index is missing.
+        if should_reindex or not _index_exists(engine, schema, SPATIAL_INDEX_NAME):
+            _create_spatial_index(engine, schema, concurrently=True)
+        else:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text(f'ANALYZE "{schema}"."krm_actuele_dataset";'))
 
         #print("data appended to table, set index GIST on geom")
         logging.info("creation of table done in schema", schema)
@@ -225,10 +299,6 @@ def loaddata2pg_test(gdf, schema):
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
-        session.execute(text("COMMIT"))
-        strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
-        session.execute(text(strsql))
-        logger.info('loaddata2pg_test: index dropped')
         # check columnname geom
         if 'geometry' in gdf.columns:
             gdf.rename_geometry('geom',inplace=True)
@@ -248,6 +318,9 @@ def loaddata2pg_test(gdf, schema):
 
         #checks the srid of the entire table and sets if necessary
         checktableSRID(schema)
+
+        # The replace flow removes indexes; recreate and analyze every run.
+        _create_spatial_index(engine, schema, concurrently=False)
 
         # close session and dispose the current engine        
         logging.info("loaddata2pg_test: creation of table done in schema")
@@ -398,7 +471,7 @@ def mainhandler_dev(bucket_name, key):
         string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
         logger.info(string)
 
-        succeeded = loaddata2pg_test(gdf, schema)
+        succeeded = loaddata2pg_production(gdf, schema)
         if succeeded:
             string = string + " loaded in dev schema, and data service refreshed"
 
