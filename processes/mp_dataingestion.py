@@ -25,6 +25,7 @@
 
 import os
 import datetime
+import uuid
 import configparser
 import geopandas as gpd
 import logging
@@ -46,9 +47,12 @@ else:
     fc = os.path.join(os.path.dirname(os.path.realpath(__file__)), "configuration.txt")
     if not os.path.exists(fc):
         fc = "/opt/pywps/configuration.txt"
-        logger.info("path to configuration", fc)
+        logger.info("Configuration path fallback selected: %s", fc)
     # print("PG configpath", confpath)
-    logger.info("path to configuration", fc)
+    logger.info("Configuration path selected: %s", fc)
+
+if os.name == "nt":
+    logger.info("Configuration path selected: %s", fc)
 
 cf = configparser.ConfigParser()
 cf.read(fc)
@@ -98,14 +102,18 @@ def establishconnection(cf):
         + cf.get("PostGIS", "db")
     ) 
     engine = create_engine(connstr, echo=False)
-    logger.info("connection setup")
+    logger.info(
+        "Database engine created for host=%s db=%s",
+        cf.get("PostGIS", "host"),
+        cf.get("PostGIS", "db"),
+    )
     Session = sessionmaker(bind=engine)
     session = Session()
     session.rollback()
     return session, engine
 
 
-def s3fileprocessing(bucket_name, key, localfile):
+def s3fileprocessing(bucket_name, key, localfile, run_id=None):
     """Downloads file from defined bucket and stores locally
 
     Args:
@@ -113,24 +121,46 @@ def s3fileprocessing(bucket_name, key, localfile):
         key (string):         Key (full path and filename)
         localfile (string):   targetfile to store
     """
+    run_token = run_id or "n/a"
     try:
+        logger.info(
+            "[run_id=%s] Downloading from S3 bucket=%s key=%s to %s",
+            run_token,
+            bucket_name,
+            key,
+            localfile,
+        )
         s3.Bucket(bucket_name).download_file(key, localfile)
+        logger.info("[run_id=%s] S3 download completed: %s", run_token, localfile)
     except ClientError as e:
         if e.response["Error"]["Code"] == "404":
-            logger.info("The object does not exist.")
+            logger.warning(
+                "[run_id=%s] S3 object not found: bucket=%s key=%s",
+                run_token,
+                bucket_name,
+                key,
+            )
         else:
             raise
 
 
-def _table_row_count(engine, schema, table_name):
+def _table_row_count(engine, schema, table_name, run_id=None):
     """Return the number of rows in a schema-qualified table."""
     strsql = f'SELECT COUNT(*) FROM "{schema}"."{table_name}";'
     with engine.connect() as conn:
         rowcount = conn.execute(text(strsql)).scalar_one()
+    if run_id:
+        logger.info(
+            "[run_id=%s] Existing rows in %s.%s: %s",
+            run_id,
+            schema,
+            table_name,
+            rowcount,
+        )
     return rowcount
 
 
-def _index_exists(engine, schema, index_name):
+def _index_exists(engine, schema, index_name, run_id=None):
     """Return True when an index exists in the provided schema."""
     strsql = """
         SELECT 1
@@ -143,16 +173,33 @@ def _index_exists(engine, schema, index_name):
             text(strsql),
             {"schema_name": schema, "index_name": index_name},
         ).first()
+    if run_id:
+        logger.info(
+            "[run_id=%s] Index presence check %s.%s: %s",
+            run_id,
+            schema,
+            index_name,
+            found is not None,
+        )
     return found is not None
 
 
-def _drop_spatial_index(engine, schema, index_name=SPATIAL_INDEX_NAME, concurrently=True):
+def _drop_spatial_index(
+    engine,
+    schema,
+    index_name=SPATIAL_INDEX_NAME,
+    concurrently=True,
+    run_id=None,
+):
     """Drop spatial index with optional CONCURRENTLY outside transaction blocks."""
     conc = " CONCURRENTLY" if concurrently else ""
     strsql = f'DROP INDEX{conc} IF EXISTS "{schema}"."{index_name}";'
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text(strsql))
-    logger.info(f"dropped index if present: {schema}.{index_name}")
+    if run_id:
+        logger.info("[run_id=%s] dropped index if present: %s.%s", run_id, schema, index_name)
+    else:
+        logger.info(f"dropped index if present: {schema}.{index_name}")
 
 
 def _create_spatial_index(
@@ -162,6 +209,7 @@ def _create_spatial_index(
     geometry_column="geom",
     index_name=SPATIAL_INDEX_NAME,
     concurrently=True,
+    run_id=None,
 ):
     """Create spatial GIST index and refresh planner stats."""
     conc = " CONCURRENTLY" if concurrently else ""
@@ -173,9 +221,17 @@ def _create_spatial_index(
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.execute(text(str_create))
         conn.execute(text(str_analyze))
-    logger.info(f"created index and analyzed table: {schema}.{index_name}")
+    if run_id:
+        logger.info(
+            "[run_id=%s] created index and analyzed table: %s.%s",
+            run_id,
+            schema,
+            index_name,
+        )
+    else:
+        logger.info(f"created index and analyzed table: {schema}.{index_name}")
 
-def loaddata2pg_production(gdf, schema):
+def loaddata2pg_production(gdf, schema, run_id=None):
     """This function creates a table based on the contents of the Geopandas Dataframe
        The function creates a copy of the data based on current datatime
        Production version appends data to original table
@@ -188,46 +244,50 @@ def loaddata2pg_production(gdf, schema):
     msg = True
     strmsg = ''
     session, engine = establishconnection(cf)
-    logger.info('gdf passed to production')
+    run_token = run_id or "n/a"
+    logger.info("[run_id=%s] Starting production-style load for schema=%s", run_token, schema)
     try:
        # test if the dataset is already there
         insp = inspect(engine)
         dt = datetime.date.today().strftime("%Y%m%d")
         # check what to do with copy of dataset of same day?
         #print("schema", schema)
-        logging.info('schema is',schema)
+        logger.info("[run_id=%s] Processing schema=%s backup_date=%s", run_token, schema, dt)
         if insp.has_table("_".join(["krm_actuele_dataset", dt]), schema=schema):
             strmsg = "copy of table" + schema + "." + "krm_actuele_dataset" + "_" + dt
-            logger.info(strmsg)
+            logger.info("[run_id=%s] %s", run_token, strmsg)
             strsql = f"""drop table {schema}.krm_actuele_dataset_{dt}"""
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
         else:
             strmsg = "table not found " + schema + "." + "krm_actuele_dataset" + "_" + dt
-            logger.info(strmsg)
+            logger.info("[run_id=%s] %s", run_token, strmsg)
 
         # this should always happen, otherwise apparently a new instance has been started
         if insp.has_table("krm_actuele_dataset", schema=schema):
             # rename if true
             strsql = f"""create table {schema}.krm_actuele_dataset_{dt} as select * from {schema}.krm_actuele_dataset"""
-            strmsg = "create copy of existing data and create "+ schema + "." + "krm_actuele_dataset" + "_" + dt,
-            logger.info(strmsg)
+            strmsg = "create copy of existing data and create " + schema + "." + "krm_actuele_dataset" + "_" + dt
+            logger.info("[run_id=%s] %s", run_token, strmsg)
 
-            logging.info("create copy of existing data and create ", schema + "." + "krm_actuele_dataset" + "_" + dt)
+            logger.info(
+                "[run_id=%s] Creating backup table before append: %s.%s",
+                run_token,
+                schema,
+                "_".join(["krm_actuele_dataset", dt]),
+            )
             with engine.connect() as conn:
                 conn.execute(text(strsql))
                 conn.commit()
-
-            session.execute(text("COMMIT"))
-            strsql = 'drop index CONCURRENTLY if exists idx_krm_actuele_dataset_geometry;' 
-            session.execute(text(strsql))
-            strmsg = 'Dropping GIST Index if exists'
-            logger.info(strmsg)
         else:
-            logger.info('this message should not be there, it means that the table krm_actuele_dataset is not there!') 
+            logger.warning(
+                "[run_id=%s] Base table missing before append: %s.krm_actuele_dataset",
+                run_token,
+                schema,
+            )
 
-        existing_rows = _table_row_count(engine, schema, "krm_actuele_dataset")
+        existing_rows = _table_row_count(engine, schema, "krm_actuele_dataset", run_id=run_token)
         incoming_rows = len(gdf)
         should_reindex = existing_rows > 0 and (
             incoming_rows / existing_rows >= APPEND_REINDEX_THRESHOLD
@@ -235,23 +295,28 @@ def loaddata2pg_production(gdf, schema):
 
         if should_reindex:
             logger.info(
-                f"incoming batch is large enough to rebuild index "
-                f"({incoming_rows} incoming, {existing_rows} existing)"
+                "[run_id=%s] incoming batch is large enough to rebuild index (%s incoming, %s existing)",
+                run_token,
+                incoming_rows,
+                existing_rows,
             )
-            _drop_spatial_index(engine, schema, concurrently=True)
+            _drop_spatial_index(engine, schema, concurrently=True, run_id=run_token)
         else:
             logger.info(
-                f"keeping existing index during append "
-                f"({incoming_rows} incoming, {existing_rows} existing)"
+                "[run_id=%s] keeping existing index during append (%s incoming, %s existing)",
+                run_token,
+                incoming_rows,
+                existing_rows,
             )
 
         # from here the passed GeoPandas dataframe is appended in to the existing table
         # first sanity check on columnname of the geometry column, should be geom
         if 'geometry' in gdf.columns:
             gdf.rename_geometry('geom',inplace=True)
+            logger.info("[run_id=%s] Renamed geometry column to geom", run_token)
         
         # check the SRID of the table, needs to match the SRID of the GDF
-        checktableSRID(schema)
+        checktableSRID(schema, run_id=run_token)
         
         # replace all textvalues 'nan' to null
         gdf = gdf.replace({'nan': None})
@@ -266,24 +331,24 @@ def loaddata2pg_production(gdf, schema):
         )
 
         # Recreate index only for large appends or when index is missing.
-        if should_reindex or not _index_exists(engine, schema, SPATIAL_INDEX_NAME):
-            _create_spatial_index(engine, schema, concurrently=True)
+        if should_reindex or not _index_exists(engine, schema, SPATIAL_INDEX_NAME, run_id=run_token):
+            _create_spatial_index(engine, schema, concurrently=True, run_id=run_token)
         else:
             with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                 conn.execute(text(f'ANALYZE "{schema}"."krm_actuele_dataset";'))
+            logger.info("[run_id=%s] Kept index and refreshed planner stats for schema=%s", run_token, schema)
 
         #print("data appended to table, set index GIST on geom")
-        logging.info("creation of table done in schema", schema)
+        logger.info("[run_id=%s] Production-style load finished for schema=%s", run_token, schema)
         session.close()
         engine.dispose()
     except Exception as e:
-        logger.error(f'Exception raised: {str(e)}')
-        logger.exception("Full traceback:") 
+        logger.exception("[run_id=%s] Production-style load failed for schema=%s: %s", run_token, schema, e)
         msg = False
     return msg
 
 
-def loaddata2pg_test(gdf, schema):
+def loaddata2pg_test(gdf, schema, run_id=None):
     """This function creates a table based on the contents of the Geopandas Dataframe
        The function creates a copy of the data based on current datatime
        Test version only replaces data 
@@ -295,14 +360,15 @@ def loaddata2pg_test(gdf, schema):
     """
     msg = True
     session, engine = establishconnection(cf)
-    logger.info('gdf passed to test schema')
+    run_token = run_id or "n/a"
+    logger.info("[run_id=%s] Starting replace-style load for schema=%s", run_token, schema)
     try:
         # from here the passed GeoPandas dataframe is inserted in to the database and
         # replaces an existing one!
         # check columnname geom
         if 'geometry' in gdf.columns:
             gdf.rename_geometry('geom',inplace=True)
-            logger.info('loaddata2pg_test: converted geometry to geom')
+            logger.info("[run_id=%s] Converted geometry column to geom", run_token)
 
         # replace all textvalues 'nan' to null
         gdf = gdf.replace({'nan': None})
@@ -317,22 +383,21 @@ def loaddata2pg_test(gdf, schema):
         )
 
         #checks the srid of the entire table and sets if necessary
-        checktableSRID(schema)
+        checktableSRID(schema, run_id=run_token)
 
         # The replace flow removes indexes; recreate and analyze every run.
-        _create_spatial_index(engine, schema, concurrently=False)
+        _create_spatial_index(engine, schema, concurrently=False, run_id=run_token)
 
         # close session and dispose the current engine        
-        logging.info("loaddata2pg_test: creation of table done in schema")
+        logger.info("[run_id=%s] Replace-style load finished for schema=%s", run_token, schema)
         session.close()
         engine.dispose()
     except Exception as e:# Log the exception with traceback        
         msg = False
-        logger.exception("An unexpected error occurred: %s", e)
-        logger.info(f'loaddata2pg_test fout: {e}')
+        logger.exception("[run_id=%s] Replace-style load failed for schema=%s: %s", run_token, schema, e)
     return msg
 
-def checktableSRID(schema, srid=4258):
+def checktableSRID(schema, srid=4258, run_id=None):
     """This function renames a set the entire table to a given srid (defaults to 4258)
 
     Args:
@@ -349,12 +414,23 @@ def checktableSRID(schema, srid=4258):
     with engine.connect() as conn:
         srid = conn.execute(text(strsql)).fetchone()[0]
         conn.commit()
-        logger.info(f'database table {srid}')
+        if run_id:
+            logger.info(
+                "[run_id=%s] Current table SRID for %s.krm_actuele_dataset: %s",
+                run_id,
+                schema,
+                srid,
+            )
+        else:
+            logger.info("Current table SRID for %s.krm_actuele_dataset: %s", schema, srid)
     if srid == 0:
         strsql = f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {srid})""" 
         conn.execute(text(strsql))
         conn.commit()
-        logger.info('database table set to srid 4258')
+        if run_id:
+            logger.info("[run_id=%s] Table SRID updated for %s.krm_actuele_dataset", run_id, schema)
+        else:
+            logger.info("Table SRID updated for %s.krm_actuele_dataset", schema)
 
     # close session and dispose the current engine
     session.close()
@@ -375,12 +451,13 @@ def mainhandler(bucket_name, key, test):
     Returns:
         string : for now with some metrics of the retrieved file
     """
+    run_id = uuid.uuid4().hex[:8]
     schema = "ihm_krm_test"
     if test == "False":
         # bear in mind, this should be changed into ihm_krm, but only after full approval of IHM
         schema = "ihm_krm"
 
-    logging.info("schema is ", schema)
+    logger.info("[run_id=%s] Ingestion request received schema=%s test=%s", run_id, schema, test)
     try:
         # localfile declaration
         if os.name == "nt":
@@ -389,9 +466,9 @@ def mainhandler(bucket_name, key, test):
             localfile = "/opt/pywps/geopackage/new.gpkg"
 
         # get file from s3
-        s3fileprocessing(bucket_name, key, localfile)
+        s3fileprocessing(bucket_name, key, localfile, run_id=run_id)
         msg = f"data downloaded to {localfile}"
-        logger.info(msg)
+        logger.info("[run_id=%s] %s", run_id, msg)
         
 
         # read file with geopandas
@@ -404,29 +481,37 @@ def mainhandler(bucket_name, key, test):
         gdfcrs = gdf.crs
 
         # load data in pg
-        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
-        logger.info(string)
-        logger.info(f'the value of test is {test}')
+        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with crs {str(gdfcrs)}"
+        logger.info("[run_id=%s] %s", run_id, string)
+        logger.info("[run_id=%s] Routing load flow based on test flag=%s", run_id, test)
         if test == 'True':
-            succeeded = loaddata2pg_test(gdf, schema)
+            succeeded = loaddata2pg_test(gdf, schema, run_id=run_id)
             if succeeded:
                 string = (
                     string
                     + " loaded in database in test schema (ihm_krm_test), test data service refreshed (ihm_krm_test)"
                 )
         elif test == 'False':
-            succeeded = loaddata2pg_production(gdf, schema)
+            succeeded = loaddata2pg_production(gdf, schema, run_id=run_id)
             if succeeded:
                 string = (
                     string + " loaded in production schema, and data service refreshed"
                 )
         else:
-            logger.info('value of test',test)
+            logger.warning("[run_id=%s] Unexpected test flag value received: %s", run_id, test)
 
-    except:
+    except Exception as e:
+        logger.exception(
+            "[run_id=%s] Main ingestion handler failed bucket=%s key=%s schema=%s: %s",
+            run_id,
+            bucket_name,
+            key,
+            schema,
+            e,
+        )
         string = "downloading file failed"
     finally:
-        logger.info(string)
+        logger.info("[run_id=%s] %s", run_id, string)
         return string
 
 
@@ -444,8 +529,9 @@ def mainhandler_dev(bucket_name, key):
         string : for now with some metrics of the retrieved file
     """
 
+    run_id = uuid.uuid4().hex[:8]
     schema = "ihm_krm_dev"
-    logging.info("schema is ", schema)
+    logger.info("[run_id=%s] Dev ingestion request received schema=%s", run_id, schema)
     try:
         # localfile declaration
         if os.name == "nt":
@@ -454,9 +540,9 @@ def mainhandler_dev(bucket_name, key):
             localfile = "/opt/pywps/geopackage/new.gpkg"
 
         # get file from s3
-        s3fileprocessing(bucket_name, key, localfile)
+        s3fileprocessing(bucket_name, key, localfile, run_id=run_id)
         msg = f"data downloaded to {localfile}"
-        logger.info(msg)
+        logger.info("[run_id=%s] %s", run_id, msg)
 
         # read file with geopandas
         # gdf = gpd.read_file(localfile, layer="krm_actuele_dataset")
@@ -468,17 +554,25 @@ def mainhandler_dev(bucket_name, key):
         gdfcrs = gdf.crs
 
         # load data in pg
-        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with csr {str(gdfcrs)}"
-        logger.info(string)
+        string = f"File ({localfile}) is valid geopackage with {nrrecords} of records in {nrcolums} columns, with crs {str(gdfcrs)}"
+        logger.info("[run_id=%s] %s", run_id, string)
 
-        succeeded = loaddata2pg_production(gdf, schema)
+        succeeded = loaddata2pg_production(gdf, schema, run_id=run_id)
         if succeeded:
             string = string + " loaded in dev schema, and data service refreshed"
 
-    except:
+    except Exception as e:
+        logger.exception(
+            "[run_id=%s] Dev ingestion handler failed bucket=%s key=%s schema=%s: %s",
+            run_id,
+            bucket_name,
+            key,
+            schema,
+            e,
+        )
         string = "downloading file failed"
     finally:
-        logger.info(string)
+        logger.info("[run_id=%s] %s", run_id, string)
         return string
 
 
