@@ -409,28 +409,43 @@ def checktableSRID(schema, srid=4258, run_id=None):
     # setup connection to the database
     session, engine = establishconnection(cf)
 
-    # check srid of target table
-    strsql = f"""select find_srid('{schema}', 'krm_actuele_dataset', 'geom')""" 
+    target_srid = srid
+
+    # check SRID of target table
+    strsql = f"""select find_srid('{schema}', 'krm_actuele_dataset', 'geom')"""
     with engine.connect() as conn:
-        srid = conn.execute(text(strsql)).fetchone()[0]
+        detected_srid = conn.execute(text(strsql)).fetchone()[0]
         conn.commit()
         if run_id:
             logger.info(
                 "[run_id=%s] Current table SRID for %s.krm_actuele_dataset: %s",
                 run_id,
                 schema,
-                srid,
+                detected_srid,
             )
         else:
-            logger.info("Current table SRID for %s.krm_actuele_dataset: %s", schema, srid)
-    if srid == 0:
-        strsql = f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {srid})""" 
-        conn.execute(text(strsql))
-        conn.commit()
+            logger.info("Current table SRID for %s.krm_actuele_dataset: %s", schema, detected_srid)
+
+    if detected_srid == 0:
+        strsql = (
+            f"""select UpdateGeometrySRID('{schema}', 'krm_actuele_dataset', 'geom', {target_srid})"""
+        )
+        with engine.connect() as conn:
+            conn.execute(text(strsql))
+            conn.commit()
         if run_id:
-            logger.info("[run_id=%s] Table SRID updated for %s.krm_actuele_dataset", run_id, schema)
+            logger.info(
+                "[run_id=%s] Table SRID updated for %s.krm_actuele_dataset to %s",
+                run_id,
+                schema,
+                target_srid,
+            )
         else:
-            logger.info("Table SRID updated for %s.krm_actuele_dataset", schema)
+            logger.info(
+                "Table SRID updated for %s.krm_actuele_dataset to %s",
+                schema,
+                target_srid,
+            )
 
     # close session and dispose the current engine
     session.close()
